@@ -442,13 +442,14 @@ export default function App() {
       const ws = workbook.worksheets[0];
       const { nameCol, possibleNextStepCol } = cols;
 
-      const originalValues = new Map<number, { name: string, refId: string }>();
+      const originalValues = new Map<number, { name: string, refId: string, alternate: string }>();
 
       previewRows.forEach(pr => {
         if (pr.rootRowIndex !== -1) {
           originalValues.set(pr.rootRowIndex, {
             name: pr.oldName,
-            refId: pr.oldReferenceId
+            refId: pr.oldReferenceId,
+            alternate: pr.oldAlternate
           });
         }
       });
@@ -487,6 +488,7 @@ export default function App() {
         const newStepStr = row.getCell(possibleNextStepCol).text || '';
         const parsedNewStep = parsePossibleNextStep(newStepStr);
         const newRefId = parsedNewStep?.referenceId || '';
+        const newAlternate = parsedNewStep?.alternateName || '';
 
         const nameChanged = orig.name.trim() !== newName.trim();
         const refChanged = orig.refId.trim() !== newRefId.trim();
@@ -508,6 +510,8 @@ export default function App() {
             rowNumber,
             oldName: orig.name,
             newName,
+            oldAlternate: orig.alternate,
+            newAlternate,
             oldReferenceId: orig.refId,
             newReferenceId: newRefId,
             updateType
@@ -553,6 +557,8 @@ export default function App() {
         { header: 'Row Number', key: 'rowNumber', width: 15 },
         { header: 'Old NAME', key: 'oldName', width: 30 },
         { header: 'Updated NAME', key: 'newName', width: 30 },
+        { header: 'Old AlternateName', key: 'oldAlternate', width: 30 },
+        { header: 'Updated AlternateName', key: 'newAlternate', width: 30 },
         { header: 'Old referenceID', key: 'oldReferenceId', width: 30 },
         { header: 'Updated referenceID', key: 'newReferenceId', width: 30 },
         { header: 'Update Type', key: 'updateType', width: 30 }
