@@ -31,6 +31,28 @@ interface PreviewRow {
   parsedStep: any;
 }
 
+interface ValidationResult {
+  status: 'PASSED' | 'FAILED';
+  totalRowsChecked: number;
+  uniqueWorkflowSteps: number;
+  duplicateWorkflowSteps: number;
+  uniqueReferenceIds: number;
+  duplicateReferenceIds: number;
+  uniqueWorkflowAndRefIds: number;
+  duplicateWorkflowAndRefIds: number;
+  workflowDuplicates: Record<string, number[]>;
+  referenceIdDuplicates: Record<string, number[]>;
+  workflowAndRefIdDuplicates: Record<string, number[]>;
+  detailedRecords: {
+    type: string;
+    value: string;
+    rowNumber: number;
+    name: string;
+    alternateName: string;
+    referenceId: string;
+  }[];
+}
+
 function extractWorkflow(name: string): string {
   const parenMatch = name?.match(/\(([^)]+)\)/);
   const workflowName = parenMatch ? parenMatch[1] : '';
@@ -130,6 +152,9 @@ export default function App() {
   const [cols, setCols] = useState({ nameCol: -1, possibleNextStepCol: -1 });
   const [verificationSummary, setVerificationSummary] = useState<any>(null);
   const [verificationRows, setVerificationRows] = useState<any[]>([]);
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [updatedWorkbookBuffer, setUpdatedWorkbookBuffer] = useState<ArrayBuffer | null>(null);
+  const [updatedWorkbookBufferNoDupes, setUpdatedWorkbookBufferNoDupes] = useState<ArrayBuffer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>('All');
   const [selectionHistory, setSelectionHistory] = useState<Set<number>[]>([new Set()]);
@@ -148,6 +173,9 @@ export default function App() {
     setWorkbook(null);
     setVerificationSummary(null);
     setVerificationRows([]);
+    setValidationResult(null);
+    setUpdatedWorkbookBuffer(null);
+    setUpdatedWorkbookBufferNoDupes(null);
     setError(null);
     setActiveFilter('All');
     setSelectionHistory([new Set()]);
@@ -435,7 +463,7 @@ export default function App() {
     saveAs(blob, 'Current_Difference_Report.csv');
   };
 
-  const applyUpdatesAndDownload = async () => {
+  const applyUpdatesAndValidate = async () => {
     if (!workbook) return;
     setIsProcessing(true);
     try {
@@ -479,6 +507,12 @@ export default function App() {
       let refIdUpdates = 0;
       let bothUpdates = 0;
 
+      const workflowMap = new Map<string, number[]>();
+      const referenceMap = new Map<string, number[]>();
+      const workflowAndRefMap = new Map<string, number[]>();
+      const rowDetails = new Map<number, { name: string, alternateName: string, referenceId: string }>();
+      let totalRowsChecked = 0;
+
       ws.eachRow((row, rowNumber) => {
         if (rowNumber < 10) return;
         const orig = originalValues.get(rowNumber);
@@ -517,6 +551,29 @@ export default function App() {
             updateType
           });
         }
+
+        // Validation logic
+        totalRowsChecked++;
+        rowDetails.set(rowNumber, { name: newName, alternateName: newAlternate, referenceId: newRefId });
+
+        const normName = newName.trim().toLowerCase().replace(/\s+/g, ' ');
+        const normRefId = newRefId.trim().toLowerCase();
+        const normBoth = `${normName} | ${normRefId}`;
+
+        if (normName) {
+          if (!workflowMap.has(normName)) workflowMap.set(normName, []);
+          workflowMap.get(normName)!.push(rowNumber);
+        }
+
+        if (normRefId) {
+          if (!referenceMap.has(normRefId)) referenceMap.set(normRefId, []);
+          referenceMap.get(normRefId)!.push(rowNumber);
+        }
+
+        if (normName && normRefId) {
+          if (!workflowAndRefMap.has(normBoth)) workflowAndRefMap.set(normBoth, []);
+          workflowAndRefMap.get(normBoth)!.push(rowNumber);
+        }
       });
 
       const summary = {
@@ -530,19 +587,252 @@ export default function App() {
       setVerificationRows(vRows);
       setVerificationSummary(summary);
 
+      const workflowDuplicates: Record<string, number[]> = {};
+      const referenceIdDuplicates: Record<string, number[]> = {};
+      const workflowAndRefIdDuplicates: Record<string, number[]> = {};
+      const detailedRecords: any[] = [];
+      const combinedDuplicateRows = new Set<number>();
+
+      let duplicateWorkflowAndRefIds = 0;
+      let uniqueWorkflowAndRefIds = 0;
+      workflowAndRefMap.forEach((rows, normBoth) => {
+        if (rows.length > 1) {
+          duplicateWorkflowAndRefIds++;
+          workflowAndRefIdDuplicates[normBoth] = rows;
+          rows.forEach(r => {
+            combinedDuplicateRows.add(r);
+            const details = rowDetails.get(r)!;
+            detailedRecords.push({
+              type: 'Workflow + referenceID Duplicate',
+              value: `${details.name} | ${details.referenceId}`,
+              rowNumber: r,
+              name: details.name,
+              alternateName: details.alternateName,
+              referenceId: details.referenceId
+            });
+          });
+        } else {
+          uniqueWorkflowAndRefIds++;
+        }
+      });
+
+      let duplicateWorkflowSteps = 0;
+      let uniqueWorkflowSteps = 0;
+      workflowMap.forEach((rows, normName) => {
+        if (rows.length > 1) {
+          const isFullyCovered = rows.every(r => combinedDuplicateRows.has(r));
+          if (!isFullyCovered) {
+            duplicateWorkflowSteps++;
+            workflowDuplicates[normName] = rows;
+            rows.forEach(r => {
+              if (!combinedDuplicateRows.has(r)) {
+                const details = rowDetails.get(r)!;
+                detailedRecords.push({
+                  type: 'Workflow Duplicate',
+                  value: details.name,
+                  rowNumber: r,
+                  name: details.name,
+                  alternateName: details.alternateName,
+                  referenceId: details.referenceId
+                });
+              }
+            });
+          }
+        } else {
+          uniqueWorkflowSteps++;
+        }
+      });
+
+      let duplicateReferenceIds = 0;
+      let uniqueReferenceIds = 0;
+      referenceMap.forEach((rows, normRefId) => {
+        if (rows.length > 1) {
+          const isFullyCovered = rows.every(r => combinedDuplicateRows.has(r));
+          if (!isFullyCovered) {
+            duplicateReferenceIds++;
+            referenceIdDuplicates[normRefId] = rows;
+            rows.forEach(r => {
+              if (!combinedDuplicateRows.has(r)) {
+                const details = rowDetails.get(r)!;
+                detailedRecords.push({
+                  type: 'referenceID Duplicate',
+                  value: details.referenceId,
+                  rowNumber: r,
+                  name: details.name,
+                  alternateName: details.alternateName,
+                  referenceId: details.referenceId
+                });
+              }
+            });
+          }
+        } else {
+          uniqueReferenceIds++;
+        }
+      });
+
+      const status = (duplicateWorkflowSteps === 0 && duplicateReferenceIds === 0 && duplicateWorkflowAndRefIds === 0) ? 'PASSED' : 'FAILED';
+
+      setValidationResult({
+        status,
+        totalRowsChecked,
+        uniqueWorkflowSteps,
+        duplicateWorkflowSteps,
+        uniqueReferenceIds,
+        duplicateReferenceIds,
+        uniqueWorkflowAndRefIds,
+        duplicateWorkflowAndRefIds,
+        workflowDuplicates,
+        referenceIdDuplicates,
+        workflowAndRefIdDuplicates,
+        detailedRecords
+      });
+
       const buffer = await workbook.xlsx.writeBuffer();
-      let originalName = rootFile?.name || 'ROOT.xlsx';
-      if (originalName.toLowerCase().endsWith('.xlsx')) {
-        originalName = originalName.substring(0, originalName.length - 5) + '_updated.xlsx';
+      setUpdatedWorkbookBuffer(buffer);
+
+      // Generate buffer without duplicates
+      const rowsToRemove = new Set<number>();
+      Object.values(workflowDuplicates).forEach(rows => rows.slice(1).forEach(r => rowsToRemove.add(r)));
+      Object.values(referenceIdDuplicates).forEach(rows => rows.slice(1).forEach(r => rowsToRemove.add(r)));
+      Object.values(workflowAndRefIdDuplicates).forEach(rows => rows.slice(1).forEach(r => rowsToRemove.add(r)));
+
+      if (rowsToRemove.size > 0) {
+        const wbNoDupes = new ExcelJS.Workbook();
+        await wbNoDupes.xlsx.load(buffer);
+        const wsNoDupes = wbNoDupes.worksheets[0];
+        const sortedRowsToRemove = Array.from(rowsToRemove).sort((a, b) => b - a);
+        for (const r of sortedRowsToRemove) {
+          wsNoDupes.spliceRows(r, 1);
+        }
+        const bufferNoDupes = await wbNoDupes.xlsx.writeBuffer();
+        setUpdatedWorkbookBufferNoDupes(bufferNoDupes);
       } else {
-        originalName += '_updated.xlsx';
+        setUpdatedWorkbookBufferNoDupes(buffer);
       }
-      saveAs(new Blob([buffer]), originalName);
     } catch (err: any) {
       setError(err.message || "An error occurred during update.");
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const downloadUpdatedFile = (removeDuplicates: boolean) => {
+    const buffer = removeDuplicates ? updatedWorkbookBufferNoDupes : updatedWorkbookBuffer;
+    if (!buffer) return;
+    let originalName = rootFile?.name || 'ROOT.xlsx';
+    const suffix = removeDuplicates ? '_updated_no_duplicates.xlsx' : '_updated.xlsx';
+    if (originalName.toLowerCase().endsWith('.xlsx')) {
+      originalName = originalName.substring(0, originalName.length - 5) + suffix;
+    } else {
+      originalName += suffix;
+    }
+    saveAs(new Blob([buffer]), originalName);
+  };
+
+  const downloadDuplicateValidationReport = () => {
+    if (!validationResult) return;
+    const wb = new ExcelJS.Workbook();
+    
+    // Sheet 1 - Summary & Details
+    const wsSummary = wb.addWorksheet('Validation Summary');
+    wsSummary.columns = [
+      { header: 'Metric / Type', key: 'metric', width: 30 },
+      { header: 'Value', key: 'value', width: 40 },
+      { header: 'Row Number', key: 'rowNumber', width: 15 },
+      { header: 'NAME', key: 'name', width: 40 },
+      { header: 'AlternateName', key: 'alternateName', width: 40 },
+      { header: 'referenceID', key: 'referenceId', width: 40 }
+    ];
+    wsSummary.addRows([
+      { metric: 'Total Rows Checked', value: validationResult.totalRowsChecked },
+      { metric: 'Unique Workflow Steps', value: validationResult.uniqueWorkflowSteps },
+      { metric: 'Duplicate Workflow Steps', value: validationResult.duplicateWorkflowSteps },
+      { metric: 'Unique referenceIDs', value: validationResult.uniqueReferenceIds },
+      { metric: 'Duplicate referenceIDs', value: validationResult.duplicateReferenceIds },
+      { metric: 'Unique Workflow + referenceIDs', value: validationResult.uniqueWorkflowAndRefIds },
+      { metric: 'Duplicate Workflow + referenceIDs', value: validationResult.duplicateWorkflowAndRefIds },
+      { metric: 'Overall Validation Status', value: validationResult.status }
+    ]);
+
+    if (validationResult.detailedRecords.length > 0) {
+      wsSummary.addRow({});
+      wsSummary.addRow({ metric: '--- DETAILED DUPLICATE RECORDS ---' });
+      wsSummary.addRow({
+        metric: 'Type',
+        value: 'Value',
+        rowNumber: 'Row Number',
+        name: 'NAME',
+        alternateName: 'AlternateName',
+        referenceId: 'referenceID'
+      });
+      
+      // Style the header row for details
+      const headerRow = wsSummary.lastRow;
+      if (headerRow) {
+        headerRow.font = { bold: true };
+        headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+      }
+
+      validationResult.detailedRecords.forEach(record => {
+        wsSummary.addRow({
+          metric: record.type,
+          value: record.value,
+          rowNumber: record.rowNumber,
+          name: record.name,
+          alternateName: record.alternateName,
+          referenceId: record.referenceId
+        });
+      });
+    }
+
+    // Sheet 2 - Duplicate Workflow Steps
+    const wsWorkflow = wb.addWorksheet('Duplicate Workflow Steps');
+    wsWorkflow.columns = [
+      { header: 'Workflow Step', key: 'step', width: 40 },
+      { header: 'Occurrence Count', key: 'count', width: 20 },
+      { header: 'Row Numbers', key: 'rows', width: 40 }
+    ];
+    Object.entries(validationResult.workflowDuplicates).forEach(([step, rows]) => {
+      wsWorkflow.addRow({ step, count: (rows as number[]).length, rows: (rows as number[]).join(', ') });
+    });
+
+    // Sheet 3 - Duplicate referenceIDs
+    const wsRef = wb.addWorksheet('Duplicate referenceIDs');
+    wsRef.columns = [
+      { header: 'referenceID', key: 'refId', width: 40 },
+      { header: 'Occurrence Count', key: 'count', width: 20 },
+      { header: 'Row Numbers', key: 'rows', width: 40 }
+    ];
+    Object.entries(validationResult.referenceIdDuplicates).forEach(([refId, rows]) => {
+      wsRef.addRow({ refId, count: (rows as number[]).length, rows: (rows as number[]).join(', ') });
+    });
+
+    // Sheet 4 - Detailed Duplicate Records
+    const wsDetails = wb.addWorksheet('Detailed Duplicate Records');
+    wsDetails.columns = [
+      { header: 'Type', key: 'type', width: 25 },
+      { header: 'Value', key: 'value', width: 40 },
+      { header: 'Row Number', key: 'rowNumber', width: 15 },
+      { header: 'NAME', key: 'name', width: 40 },
+      { header: 'AlternateName', key: 'alternateName', width: 40 },
+      { header: 'referenceID', key: 'referenceId', width: 40 }
+    ];
+    wsDetails.addRows(validationResult.detailedRecords);
+
+    // Sheet 4 - Duplicate Workflow + referenceIDs
+    const wsBoth = wb.addWorksheet('Duplicate Workflow+refID');
+    wsBoth.columns = [
+      { header: 'Workflow + referenceID', key: 'both', width: 40 },
+      { header: 'Occurrence Count', key: 'count', width: 20 },
+      { header: 'Row Numbers', key: 'rows', width: 40 }
+    ];
+    Object.entries(validationResult.workflowAndRefIdDuplicates).forEach(([both, rows]) => {
+      wsBoth.addRow({ both, count: (rows as number[]).length, rows: (rows as number[]).join(', ') });
+    });
+
+    wb.xlsx.writeBuffer().then(buffer => {
+      saveAs(new Blob([buffer]), 'Duplicate_Validation_Report.xlsx');
+    });
   };
 
   const downloadVerificationReport = (format: 'csv' | 'xlsx') => {
@@ -735,6 +1025,101 @@ export default function App() {
           </div>
         )}
 
+        {validationResult && (
+          <div className={`border rounded-2xl p-6 ${validationResult.status === 'PASSED' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+            <h2 className={`text-lg font-medium mb-4 flex items-center gap-2 ${validationResult.status === 'PASSED' ? 'text-emerald-900' : 'text-red-900'}`}>
+              {validationResult.status === 'PASSED' ? (
+                <><CheckCircle2 className="w-5 h-5" /> All validations passed ✅</>
+              ) : (
+                <><AlertCircle className="w-5 h-5" /> Validation failed ❌</>
+              )}
+            </h2>
+            
+            {validationResult.status === 'PASSED' ? (
+              <p className="text-emerald-700 mb-6">Workflow Steps and referenceIDs are unique.</p>
+            ) : (
+              <div className="mb-6">
+                <p className="text-red-700 mb-4">Duplicate Workflow Steps or referenceIDs detected.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-white p-4 rounded-xl border border-red-100 shadow-sm">
+                    <p className="text-xs text-red-600 font-medium uppercase tracking-wider">Duplicate Workflow Steps</p>
+                    <p className="text-2xl font-semibold text-red-900 mt-1">{validationResult.duplicateWorkflowSteps}</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl border border-red-100 shadow-sm">
+                    <p className="text-xs text-red-600 font-medium uppercase tracking-wider">Duplicate referenceIDs</p>
+                    <p className="text-2xl font-semibold text-red-900 mt-1">{validationResult.duplicateReferenceIds}</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl border border-red-100 shadow-sm">
+                    <p className="text-xs text-red-600 font-medium uppercase tracking-wider">Duplicate Workflow + refIDs</p>
+                    <p className="text-2xl font-semibold text-red-900 mt-1">{validationResult.duplicateWorkflowAndRefIds}</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl border border-red-100 shadow-sm">
+                    <p className="text-xs text-red-600 font-medium uppercase tracking-wider">Total Affected Rows</p>
+                    <p className="text-2xl font-semibold text-red-900 mt-1">{validationResult.detailedRecords.length}</p>
+                  </div>
+                </div>
+
+                {validationResult.detailedRecords.length > 0 && (
+                  <div className="mt-6 bg-white rounded-xl border border-red-200 overflow-hidden shadow-sm">
+                    <div className="overflow-x-auto max-h-80">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-red-50 sticky top-0 z-10">
+                          <tr>
+                            <th className="p-3 text-xs font-semibold text-red-800 border-b border-red-100">Type</th>
+                            <th className="p-3 text-xs font-semibold text-red-800 border-b border-red-100">Row</th>
+                            <th className="p-3 text-xs font-semibold text-red-800 border-b border-red-100">NAME</th>
+                            <th className="p-3 text-xs font-semibold text-red-800 border-b border-red-100">AlternateName</th>
+                            <th className="p-3 text-xs font-semibold text-red-800 border-b border-red-100">referenceID</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-red-100">
+                          {validationResult.detailedRecords.map((record, idx) => (
+                            <tr key={idx} className="hover:bg-red-50/50">
+                              <td className="p-3 text-sm text-red-900 font-medium whitespace-nowrap">{record.type}</td>
+                              <td className="p-3 text-sm text-red-900 whitespace-nowrap">{record.rowNumber}</td>
+                              <td className="p-3 text-sm text-red-900 min-w-[200px]">{record.name}</td>
+                              <td className="p-3 text-sm text-red-900 min-w-[150px]">{record.alternateName}</td>
+                              <td className="p-3 text-sm text-red-900 min-w-[150px]">{record.referenceId}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={downloadDuplicateValidationReport}
+                className={`flex items-center gap-2 bg-white px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${validationResult.status === 'PASSED' ? 'hover:bg-emerald-50 text-emerald-700 border-emerald-200' : 'hover:bg-red-50 text-red-700 border-red-200'}`}
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                Download Duplicate Validation Report (XLSX)
+              </button>
+              
+              <button
+                onClick={() => downloadUpdatedFile(false)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors text-white ${validationResult.status === 'PASSED' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}
+              >
+                <Download className="w-4 h-4" />
+                Download Updated XLSX (With Duplicates)
+              </button>
+
+              {validationResult.status === 'FAILED' && (
+                <button
+                  onClick={() => downloadUpdatedFile(true)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors text-white bg-indigo-600 hover:bg-indigo-700"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Updated XLSX (Without Duplicates)
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {previewRows.length > 0 && (
           <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-6">
             <h2 className="text-lg font-medium text-indigo-900 mb-4 flex items-center gap-2">
@@ -772,12 +1157,12 @@ export default function App() {
                   Current Difference Report
                 </button>
                 <button
-                  onClick={applyUpdatesAndDownload}
+                  onClick={applyUpdatesAndValidate}
                   disabled={selectedRowIds.size === 0 || isProcessing}
                   className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Download className="w-4 h-4" />
-                  Apply Updates & Download XLSX
+                  <CheckSquare className="w-4 h-4" />
+                  Apply Updates & Validate
                 </button>
               </div>
             </div>
