@@ -128,12 +128,20 @@ function parsePossibleNextStep(step: string) {
 }
 
 function updateReferenceIdInStep(originalStep: string, newRefId: string) {
-  const match = originalStep.match(/(.*,)(\s*)(.*)$/);
-  const escapedNewRef = `"${(newRefId || '').replace(/"/g, '""')}"`;
-  if (match) {
-    return `${match[1]}${match[2]}${escapedNewRef}`;
+  if (!originalStep) return newRefId;
+  
+  const parsedResult = Papa.parse(originalStep.trim(), { header: false });
+  const parsed = parsedResult.data[0] as string[];
+  
+  if (!parsed || parsed.length === 0) {
+    return `"${(newRefId || '').replace(/"/g, '""')}"`;
   }
-  return escapedNewRef;
+  
+  // The reference ID is always the last element in the comma-separated list
+  parsed[parsed.length - 1] = newRefId;
+  
+  // Convert back to CSV string safely
+  return Papa.unparse([parsed], { header: false }).trim();
 }
 
 function canUpdate(changeType: string) {
