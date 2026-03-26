@@ -1104,7 +1104,7 @@ export default function App() {
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors text-white ${validationResult.status === 'PASSED' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}
               >
                 <Download className="w-4 h-4" />
-                Download Updated XLSX (With Duplicates)
+                {validationResult.status === 'PASSED' ? 'Download Updated XLSX' : 'Download Updated XLSX (With Duplicates)'}
               </button>
 
               {validationResult.status === 'FAILED' && (
