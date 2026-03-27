@@ -455,6 +455,12 @@ export default function App() {
     }
   };
 
+  const getRootSuffix = () => {
+    if (!rootFile) return '';
+    const firstWord = rootFile.name.split(/[\s_\-\.]+/)[0];
+    return firstWord ? `_${firstWord}` : '';
+  };
+
   const downloadDifferenceReport = () => {
     const data = previewRows.map(r => ({
       Row: r.rootRowIndex !== -1 ? r.rootRowIndex : 'N/A',
@@ -468,7 +474,7 @@ export default function App() {
     }));
     const csv = Papa.unparse(data);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    saveAs(blob, 'Current_Difference_Report.csv');
+    saveAs(blob, `Current_Difference_Report${getRootSuffix()}.csv`);
   };
 
   const applyUpdatesAndValidate = async () => {
@@ -839,15 +845,16 @@ export default function App() {
     });
 
     wb.xlsx.writeBuffer().then(buffer => {
-      saveAs(new Blob([buffer]), 'Duplicate_Validation_Report.xlsx');
+      saveAs(new Blob([buffer]), `Duplicate_Validation_Report${getRootSuffix()}.xlsx`);
     });
   };
 
   const downloadVerificationReport = (format: 'csv' | 'xlsx') => {
+    const suffix = getRootSuffix();
     if (format === 'csv') {
       const csv = Papa.unparse(verificationRows);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      saveAs(blob, 'Post-Update_Verification_Report.csv');
+      saveAs(blob, `Post-Update_Verification_Report${suffix}.csv`);
     } else {
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet('Verification');
@@ -863,7 +870,7 @@ export default function App() {
       ];
       ws.addRows(verificationRows);
       wb.xlsx.writeBuffer().then(buffer => {
-        saveAs(new Blob([buffer]), 'Post-Update_Verification_Report.xlsx');
+        saveAs(new Blob([buffer]), `Post-Update_Verification_Report${suffix}.xlsx`);
       });
     }
   };
