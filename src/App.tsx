@@ -105,7 +105,24 @@ function cleanAlternateName(name: string): string {
 
 function parsePossibleNextStep(step: string) {
   if (!step) return null;
-  const parsed = Papa.parse(step.trim(), { header: false }).data[0] as string[];
+  const trimmed = step.trim();
+  
+  // Try to match the exact format: "String","String",Boolean,"String"
+  // This handles commas inside the strings perfectly without breaking.
+  const exactMatch = trimmed.match(/^"(.*?)","(.*?)",([^,]*),"(.*)"$/);
+  
+  if (exactMatch) {
+    return {
+      val1: exactMatch[1],
+      alternateName: cleanAlternateName(exactMatch[2]),
+      val3: exactMatch[3],
+      referenceId: exactMatch[4],
+      originalString: step
+    };
+  }
+
+  // Fallback to Papa Parse if the format is slightly different
+  const parsed = Papa.parse(trimmed, { header: false }).data[0] as string[];
   if (!parsed || parsed.length < 4) return null;
   
   const clean = (val: string) => {
@@ -129,8 +146,18 @@ function parsePossibleNextStep(step: string) {
 
 function updateReferenceIdInStep(originalStep: string, newRefId: string) {
   if (!originalStep) return newRefId;
+  const trimmed = originalStep.trim();
   
-  const parsedResult = Papa.parse(originalStep.trim(), { header: false });
+  // Try to match the exact format: "String","String",Boolean,"String"
+  const exactMatch = trimmed.match(/^"(.*?)","(.*?)",([^,]*),"(.*)"$/);
+  
+  if (exactMatch) {
+    // Reconstruct the string keeping the exact format
+    return `"${exactMatch[1]}","${exactMatch[2]}",${exactMatch[3]},"${newRefId}"`;
+  }
+  
+  // Fallback to Papa Parse
+  const parsedResult = Papa.parse(trimmed, { header: false });
   const parsed = parsedResult.data[0] as string[];
   
   if (!parsed || parsed.length === 0) {
