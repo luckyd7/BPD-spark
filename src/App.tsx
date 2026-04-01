@@ -13,7 +13,6 @@ interface NewRow {
   canonicalKey: string;
   keyIgnoreRef: string;
   keyIgnoreAlt: string;
-  keyWorkflowOnly: string;
   keyAltAndRef: string;
 }
 
@@ -86,9 +85,6 @@ function getKeyIgnoreRef(norm: string, alt: string) {
 }
 function getKeyIgnoreAlt(norm: string, ref: string) {
   return `${cleanStr(norm)} | ${cleanStr(ref)}`;
-}
-function getKeyWorkflowOnly(norm: string) {
-  return `${cleanStr(norm)}`;
 }
 function getKeyAltAndRef(alt: string, ref: string) {
   return `${cleanStr(alt)} | ${cleanStr(ref)}`;
@@ -313,7 +309,6 @@ export default function App() {
           canonicalKey: getCanonicalKey(norm, cleanedAlternateName, row.referenceID),
           keyIgnoreRef: getKeyIgnoreRef(norm, cleanedAlternateName),
           keyIgnoreAlt: getKeyIgnoreAlt(norm, row.referenceID),
-          keyWorkflowOnly: getKeyWorkflowOnly(norm),
           keyAltAndRef: getKeyAltAndRef(cleanedAlternateName, row.referenceID)
         };
       });
@@ -321,14 +316,12 @@ export default function App() {
       const newByCanonical = new Map<string, NewRow>();
       const newByIgnoreRef = new Map<string, NewRow>();
       const newByIgnoreAlt = new Map<string, NewRow>();
-      const newByWorkflow = new Map<string, NewRow>();
       const newByAltAndRef = new Map<string, NewRow>();
 
       newRows.forEach(row => {
         newByCanonical.set(row.canonicalKey, row);
         newByIgnoreRef.set(row.keyIgnoreRef, row);
         newByIgnoreAlt.set(row.keyIgnoreAlt, row);
-        newByWorkflow.set(row.keyWorkflowOnly, row);
         newByAltAndRef.set(row.keyAltAndRef, row);
       });
 
@@ -354,7 +347,6 @@ export default function App() {
           const canonicalKey = getCanonicalKey(norm, parsedStep.alternateName, parsedStep.referenceId);
           const keyIgnoreRef = getKeyIgnoreRef(norm, parsedStep.alternateName);
           const keyIgnoreAlt = getKeyIgnoreAlt(norm, parsedStep.referenceId);
-          const keyWorkflowOnly = getKeyWorkflowOnly(norm);
           const keyAltAndRef = getKeyAltAndRef(parsedStep.alternateName, parsedStep.referenceId);
 
           if (newByCanonical.has(canonicalKey)) {
@@ -363,8 +355,6 @@ export default function App() {
             matchedNewRow = newByIgnoreRef.get(keyIgnoreRef)!;
           } else if (newByIgnoreAlt.has(keyIgnoreAlt)) {
             matchedNewRow = newByIgnoreAlt.get(keyIgnoreAlt)!;
-          } else if (newByWorkflow.has(keyWorkflowOnly)) {
-            matchedNewRow = newByWorkflow.get(keyWorkflowOnly)!;
           } else if (newByAltAndRef.has(keyAltAndRef)) {
             matchedNewRow = newByAltAndRef.get(keyAltAndRef)!;
           }
