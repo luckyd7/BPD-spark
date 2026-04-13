@@ -103,9 +103,9 @@ function parsePossibleNextStep(step: string) {
   if (!step) return null;
   const trimmed = step.trim();
   
-  // Try to match the exact format: "String","String",Boolean,"String"
-  // This handles commas inside the strings perfectly without breaking.
-  const exactMatch = trimmed.match(/^"(.*?)","(.*?)",([^,]*),"(.*)"$/);
+  // Try to match the exact format: "String", "String", Boolean, "String"
+  // This handles commas inside the strings perfectly without breaking and allows optional spaces.
+  const exactMatch = trimmed.match(/^"(.*?)"\s*,\s*"(.*?)"\s*,\s*(.*?)\s*,\s*"(.*)"$/);
   
   if (exactMatch) {
     return {
@@ -144,12 +144,13 @@ function updateReferenceIdInStep(originalStep: string, newRefId: string) {
   if (!originalStep) return newRefId;
   const trimmed = originalStep.trim();
   
-  // Try to match the exact format: "String","String",Boolean,"String"
-  const exactMatch = trimmed.match(/^"(.*?)","(.*?)",([^,]*),"(.*)"$/);
+  // Try to match the exact format: "String", "String", Boolean, "String"
+  // Capturing the separators to preserve exact spacing
+  const exactMatch = trimmed.match(/^"(.*?)"(\s*,\s*)"(.*?)"(\s*,\s*)(.*?)(\s*,\s*)"(.*)"$/);
   
   if (exactMatch) {
-    // Reconstruct the string keeping the exact format
-    return `"${exactMatch[1]}","${exactMatch[2]}",${exactMatch[3]},"${newRefId}"`;
+    // Reconstruct the string keeping the exact formatting and spacing
+    return `"${exactMatch[1]}"${exactMatch[2]}"${exactMatch[3]}"${exactMatch[4]}${exactMatch[5]}${exactMatch[6]}"${newRefId}"`;
   }
   
   // Fallback to Papa Parse
